@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<title>QR Redirect</title>
+<link rel="preconnect" href="https://docs.google.com" crossorigin>
+<link rel="dns-prefetch" href="https://docs.google.com">
+<style>
+  :root { color-scheme: light dark; --bg:#f5f5f7; --fg:#1d1d1f; --card:rgba(127,127,127,.12); --line:rgba(127,127,127,.35); --accent:#0071e3; --ok:#188038; --warn:#b06000; --err:#d93025; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#111; --fg:#f5f5f7; --ok:#4cc16a; --warn:#f2a33a; --err:#ff6b60; } }
+  * { box-sizing: border-box; }
+  html { background: var(--bg); }
+  body { margin:0; font-family: system-ui,-apple-system,"Segoe UI",sans-serif; background:var(--bg); color:var(--fg); }
+  /* Режим редиректа: ничего не рисуем, чтобы не было мигания */
+  html.redirecting body { visibility:hidden; }
+  [hidden] { display:none !important; }
+
+  #landing { min-height:100vh; display:grid; place-items:center; text-align:center; padding:24px; }
+  #landing h1 { font-size:1.6rem; margin:0 0 8px; }
+  #landing p { margin:0; opacity:.7; }
+
+  #admin { max-width:960px; margin:0 auto; padding:24px; }
+  #admin h1 { font-size:1.4rem; margin:0 0 16px; }
+  .grid { display:grid; gap:20px; grid-template-columns: 1fr 360px; align-items:start; }
+  @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
+  .card { background:var(--card); border-radius:16px; padding:20px; margin-bottom:20px; }
+  .card h2 { font-size:1rem; margin:0 0 12px; }
+  label { display:block; font-size:.85rem; margin:14px 0 6px; opacity:.8; }
+  input[type=text], input[type=url], select {
+    width:100%; padding:10px 12px; border-radius:10px; font-size:1rem;
+    border:1px solid var(--line); background:transparent; color:inherit;
+  }
+  input[type=color] { width:100%; height:42px; border:none; border-radius:10px; padding:0; background:none; }
+  input[type=range] { width:100%; }
+  .row { display:flex; gap:12px; } .row > div { flex:1; }
+  .inline { display:flex; gap:8px; } .inline input { flex:1; }
+  button, .btn {
+    padding:10px 14px; font-size:.95rem; border:none; border-radius:10px; cursor:pointer;
+    background:var(--accent); color:#fff; text-decoration:none; display:inline-block; text-align:center;
+  }
+  button.secondary { background:transparent; color:var(--fg); border:1px solid var(--line); }
+  button:hover { filter:brightness(1.08); }
+  button.full { width:100%; margin-top:12px; }
+  .banner { border-radius:12px; padding:12px 14px; font-size:.9rem; line-height:1.45; margin-bottom:20px; border:1px solid transparent; }
+  .banner.ok   { background:rgba(24,128,56,.14);  border-color:var(--ok);   }
+  .banner.warn { background:rgba(240,160,40,.16); border-color:var(--warn); }
+  .banner.err  { background:rgba(217,48,37,.14);  border-color:var(--err);  }
+  .banner.info { background:var(--card); border-color:var(--line); }
+  .banner b { display:block; margin-bottom:4px; }
+  .banner ol { margin:6px 0 0 18px; padding:0; }
+  code { background:rgba(127,127,127,.2); padding:1px 5px; border-radius:5px; font-size:.9em; word-break:break-all; }
+  .check { font-size:.85rem; margin-top:8px; min-height:1.3em; }
+  .check.ok{color:var(--ok);} .check.warn{color:var(--warn);} .check.err{color:var(--err);}
+  .hint { font-size:.8rem; opacity:.65; margin-top:8px; }
+  #qr { display:grid; place-items:center; min-height:320px; }
+  #qr canvas, #qr svg { max-width:100%; height:auto; }
+  #map { max-height:220px; overflow:auto; font-size:.85rem; }
+  #map button { all:unset; cursor:pointer; display:block; width:100%; padding:6px 4px; border-bottom:1px solid var(--line); }
+  #map button:hover { background:rgba(127,127,127,.15); }
+  #map .u { opacity:.6; word-break:break-all; }
+</style>
+</head>
+<body>
+
+<main id="landing" hidden>
+  <div>
+    <h1>QR Redirect</h1>
+    <p>Сервис работает. Ссылки вида <code>/?id=k1</code>.</p>
+  </div>
+</main>
+
+<section id="admin" hidden>
+  <h1>Админка QR-кодов</h1>
+
+  <div id="csvBanner" class="banner info">Загрузка…</div>
+
+  <div class="grid">
+    <div>
+      <div class="card">
+        <h2>1. Ссылка для QR</h2>
+        <label for="base">Адрес вашего сайта (где лежит этот index.html)</label>
+        <input id="base" type="url" placeholder="https://мой-домен.vercel.app/">
+
+        <label for="id">ID (выберите из таблицы или введите свой)</label>
+        <input id="id" type="text" list="ids" value="k1" autocomplete="off" spellcheck="false">
+        <datalist id="ids"></datalist>
+        <div id="bindCheck" class="check"></div>
+
+        <label for="link">Готовая ссылка для QR</label>
+        <div class="inline">
+          <input id="link" type="text" readonly>
+          <button id="copy" type="button">Копировать</button>
+        </div>
+        <div class="inline" style="margin-top:8px">
+          <a id="test" class="btn secondary" target="_blank" rel="noopener" style="flex:1">Проверить переход</a>
+          <button id="reload" class="secondary" type="button" style="flex:1">Обновить CSV</button>
+        </div>
+        <div id="copyMsg" class="check"></div>
+      </div>
+
+      <div class="card">
+        <h2>2. Оформление</h2>
+        <div class="row">
+          <div><label for="dots">Цвет точек</label><input id="dots" type="color" value="#000000"></div>
+          <div><label for="bg">Цвет фона</label><input id="bg" type="color" value="#ffffff"></div>
+        </div>
+        <div class="row">
+          <div>
+            <label for="style">Форма точек</label>
+            <select id="style">
+              <option value="square">Квадраты (надёжнее всего)</option>
+              <option value="rounded">Скруглённые</option>
+              <option value="dots">Круги</option>
+              <option value="classy">Classy</option>
+              <option value="extra-rounded">Extra-rounded</option>
+            </select>
+          </div>
+          <div>
+            <label for="ecl">Коррекция ошибок</label>
+            <select id="ecl">
+              <option value="L">L — 7%</option>
+              <option value="M">M — 15%</option>
+              <option value="Q">Q — 25%</option>
+              <option value="H" selected>H — 30%</option>
+            </select>
+          </div>
+        </div>
+        <label for="logo">Логотип в центре (PNG/JPG/SVG)</label>
+        <input id="logo" type="file" accept="image/*">
+        <div id="logoCtl" hidden>
+          <label for="logoSize">Размер логотипа: <span id="logoSizeVal">25</span>%</label>
+          <input id="logoSize" type="range" min="10" max="35" value="25">
+          <button id="logoClear" class="secondary full" type="button">Убрать логотип</button>
+        </div>
+        <div id="qrWarn" class="check"></div>
+      </div>
+
+      <div class="card" id="mapCard" hidden>
+        <h2>Таблица привязок (нажмите, чтобы выбрать ID)</h2>
+        <div id="map"></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="card">
+        <div id="qr"></div>
+        <button id="dlPng" class="full" type="button">Скачать PNG 1000×1000</button>
+        <button id="dlSvg" class="secondary full" type="button">Скачать SVG</button>
+        <div class="hint">Перед тиражом отсканируйте код телефоном. Конечные ссылки меняются в Google Таблице, QR перепечатывать не нужно.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<noscript>
+  <p style="padding:24px;font-family:system-ui">Нужен JavaScript. <a id="nsLink" href="https://webdesigncrl.vercel.app">Перейти на сайт</a></p>
+</noscript>
+
+<script>
+/* ============================ НАСТРОЙКИ ============================ */
+// Ссылка на опубликованную CSV (Google Таблица → Файл → Поделиться → Опубликовать в Интернете → CSV).
+// Пока пусто: все ID ведут на FALLBACK_URL, а админка покажет подсказку.
+const CSV_URL = "";
+// Куда отправлять, если id не найден, CSV недоступен или не задан.
+const FALLBACK_URL = "https://webdesigncrl.vercel.app";
+// Сколько ждать CSV перед запасным вариантом, мс.
+const FETCH_TIMEOUT_MS = 3000;
+/* =================================================================== */
+
+const CACHE_KEY = "qr_csv_cache_v1";
+const params = new URLSearchParams(location.search);
+const IS_ADMIN = params.get("admin") === "1";
+const ID = (params.get("id") || "").trim();
+
+/* ---------------- Парсинг CSV и проверка URL ---------------- */
+// <parser>
+function parseCSV(text) {
+  text = String(text).replace(/^\uFEFF/, "");
+  const rows = [];
+  let row = [], field = "", inQ = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQ) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; }   // "" -> "
+        else inQ = false;
+      } else field += c;                                   // запятые и переносы внутри кавычек сохраняем
+    } else if (c === '"' && field.trim() === "") {         // кавычка открывает поле только в его начале
+      field = ""; inQ = true;
+    } else if (c === ",") {
+      row.push(field); field = "";
+    } else if (c === "\n" || c === "\r") {
+      if (c === "\r" && text[i + 1] === "\n") i++;         // \r\n как один перенос
+      row.push(field); field = ""; rows.push(row); row = [];
+    } else field += c;
+  }
+  if (field !== "" || row.length) { row.push(field); rows.push(row); }
+  return rows.filter(r => r.some(v => v.trim() !== ""));   // выбрасываем пустые строки
+}
+
+function safeUrl(u) {
+  u = String(u || "").trim();
+  if (!u) return null;
+  if (!/^[a-z][a-z0-9+.-]*:/i.test(u)) u = "https://" + u;  // "site.com" -> "https://site.com"
+  try {
+    const p = new URL(u);
+    return (p.protocol === "http:" || p.protocol === "https:") ? p.href : null; // блокируем javascript:, data: и т.п.
+  } catch (e) { return null; }
+}
+
+function buildMap(rows) {
+  const out = { map: {}, list: [], invalid: [], duplicates: [] };
+  if (!rows.length) return out;
+  const head = rows[0].map(h => h.trim().toLowerCase());
+  let iId = head.indexOf("id"), iUrl = head.indexOf("url"), data;
+  if (iId >= 0 && iUrl >= 0) data = rows.slice(1);
+  else { iId = 0; iUrl = 1; data = rows; }                   // нет заголовка: берём первые две колонки
+  for (const r of data) {
+    const id = (r[iId] || "").trim();
+    if (!id) continue;
+    const key = id.toLowerCase();
+    const url = safeUrl(r[iUrl]);
+    if (!url) { out.invalid.push(id); continue; }
+    if (key in out.map) { out.duplicates.push(id); continue; } // при дубликате действует первая строка
+    out.map[key] = url;
+    out.list.push({ id, url });
+  }
+  return out;
+}
+// </parser>
+
+/* ---------------- Загрузка CSV ---------------- */
+async function fetchCSV() {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const sep = CSV_URL.includes("?") ? "&" : "?";
+    const res = await fetch(CSV_URL + sep + "_=" + Date.now(), { cache: "no-store", signal: ctrl.signal });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = buildMap(parseCSV(await res.text()));
+    try { localStorage.setItem(CACHE_KEY, JSON.stringify(data.map)); } catch (e) {}
+    return data;
+  } finally { clearTimeout(timer); }
+}
+function cachedMap() {
+  try { return JSON.parse(localStorage.getItem(CACHE_KEY) || "null"); } catch (e) { return null; }
+}
+
+/* ---------------- Режим редиректа ---------------- */
+async function redirect() {
+  const go = u => location.replace(u);
+  const fallback = safeUrl(FALLBACK_URL) || "about:blank";
+  if (!CSV_URL) return go(fallback);
+  try {
+    const data = await fetchCSV();
+    return go(data.map[ID.toLowerCase()] || fallback);
+  } catch (e) {
+    const c = cachedMap();                                   // CSV недоступен: пробуем последнюю удачную копию
+    return go((c && c[ID.toLowerCase()]) || fallback);
+  }
+}
+
+if (ID && !IS_ADMIN) {
+  document.documentElement.classList.add("redirecting");     // выполняется до отрисовки body
+  redirect();
+}
+
+/* ---------------- Админка ---------------- */
+function initAdmin() {
+  const $ = id => document.getElementById(id);
+  $("admin").hidden = false;
+
+  const state = { data: null, loaded: false, error: null, logo: null, lib: null };
+  const isFile = location.protocol === "file:";
+
+  // базовый адрес по умолчанию
+  $("base").value = isFile ? "https://мой-домен.vercel.app/"
+    : location.origin + location.pathname.replace(/index\.html$/, "");
+
+  function banner(cls, html) { const b = $("csvBanner"); b.className = "banner " + cls; b.innerHTML = html; }
+
+  function renderBanner() {
+    if (!CSV_URL) {
+      banner("warn",
+        "<b>CSV_URL ещё не задан</b>Пока все ID ведут на запасную ссылку <code>" + esc(FALLBACK_URL) + "</code>. Чтобы ссылки менялись из таблицы:" +
+        "<ol><li>Создайте Google Таблицу с колонками <code>id</code> и <code>url</code>.</li>" +
+        "<li>Файл → Поделиться → Опубликовать в Интернете → выберите лист и формат CSV → Опубликовать.</li>" +
+        "<li>Скопируйте полученную ссылку в константу <code>CSV_URL</code> в начале скрипта <code>index.html</code> и задеплойте заново.</li></ol>");
+      return;
+    }
+    if (!state.loaded && !state.error) { banner("info", "Загружаю CSV…"); return; }
+    if (state.error) {
+      banner("err", "<b>CSV не загрузился</b>" + esc(state.error) + ". Проверьте, что таблица опубликована как CSV и ссылка скопирована полностью. Пока работает запасная ссылка.");
+      return;
+    }
+    const d = state.data, notes = [];
+    if (d.invalid.length) notes.push("некорректный URL у ID: " + d.invalid.map(esc).join(", "));
+    if (d.duplicates.length) notes.push("повторяются ID (действует первая строка): " + d.duplicates.map(esc).join(", "));
+    banner(notes.length ? "warn" : "ok",
+      "<b>CSV подключён: " + d.list.length + " ID</b>" + (notes.length ? notes.join("<br>") : "Google обновляет опубликованный CSV с задержкой до нескольких минут."));
+  }
+
+  function renderMap() {
+    const d = state.data;
+    $("mapCard").hidden = !(d && d.list.length);
+    $("ids").innerHTML = "";
+    $("map").innerHTML = "";
+    if (!d) return;
+    for (const it of d.list) {
+      const o = document.createElement("option"); o.value = it.id; $("ids").appendChild(o);
+      const b = document.createElement("button"); b.type = "button";
+      b.innerHTML = "<b>" + esc(it.id) + "</b> <span class='u'>→ " + esc(it.url) + "</span>";
+      b.onclick = () => { $("id").value = it.id; refresh(); };
+      $("map").appendChild(b);
+    }
+  }
+
+  function currentLink() {
+    let base = $("base").value.trim() || location.origin + "/";
+    if (!base.endsWith("/") && !/[?#]/.test(base)) base += "/";
+    const id = $("id").value.trim();
+    return base + "?id=" + encodeURIComponent(id);
+  }
+
+  function renderBinding() {
+    const el = $("bindCheck"), id = $("id").value.trim();
+    if (!id) { el.className = "check warn"; el.textContent = "Введите ID."; return; }
+    if (!/^[\w.\-]+$/.test(id)) { el.className = "check warn"; el.textContent = "Лучше использовать латиницу, цифры, - _ ."; return; }
+    if (!CSV_URL) { el.className = "check warn"; el.textContent = "CSV не подключён: ID «" + id + "» отправит на запасную ссылку."; return; }
+    if (!state.data) { el.className = "check"; el.textContent = state.error ? "Проверка недоступна: CSV не загрузился." : "Проверяю…"; return; }
+    const url = state.data.map[id.toLowerCase()];
+    if (url) { el.className = "check ok"; el.textContent = "✓ Привязан: " + url; }
+    else { el.className = "check err"; el.textContent = "✗ ID нет в таблице: переход пойдёт на запасную ссылку. Добавьте строку в таблицу."; }
+  }
+
+  function renderLink() {
+    const link = currentLink();
+    $("link").value = link;
+    $("test").href = link;
+  }
+
+  /* ---- QR ---- */
+  function luminance(hex) {
+    const v = [1, 3, 5].map(i => parseInt(hex.substr(i, 2), 16) / 255)
+      .map(c => c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
+    return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2];
+  }
+  function qrOptions(size) {
+    const sq = $("style").value === "square";
+    const o = {
+      width: size, height: size, type: "canvas", data: $("link").value || " ",
+      margin: Math.round(size * 0.04),
+      qrOptions: { errorCorrectionLevel: $("ecl").value },
+      dotsOptions: { color: $("dots").value, type: $("style").value },
+      cornersSquareOptions: { color: $("dots").value, type: sq ? "square" : "extra-rounded" },
+      cornersDotOptions: { color: $("dots").value },
+      backgroundOptions: { color: $("bg").value }
+    };
+    if (state.logo) {
+      o.image = state.logo;
+      o.imageOptions = { hideBackgroundDots: true, imageSize: $("logoSize").value / 100, margin: 4, crossOrigin: "anonymous" };
+    }
+    return o;
+  }
+  function renderQR() {
+    if (!state.lib) return;
+    if (!state.preview) { state.preview = new QRCodeStyling(qrOptions(320)); state.preview.append($("qr")); }
+    else state.preview.update(qrOptions(320));
+    const l1 = luminance($("dots").value), l2 = luminance($("bg").value);
+    const ratio = (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+    const w = [];
+    if (ratio < 4) w.push("Низкий контраст: код может плохо сканироваться.");
+    else if (l1 > l2) w.push("Точки светлее фона (инверсия): часть сканеров не прочитает код.");
+    if (state.logo && $("ecl").value !== "H") w.push("С логотипом выберите коррекцию H.");
+    $("qrWarn").className = "check warn"; $("qrWarn").textContent = w.join(" ");
+  }
+
+  function refresh() { renderBinding(); renderLink(); renderQR(); }
+
+  /* ---- события ---- */
+  ["base", "id", "dots", "bg", "style", "ecl", "logoSize"].forEach(k => {
+    $(k).addEventListener("input", () => { if (k === "logoSize") $("logoSizeVal").textContent = $("logoSize").value; refresh(); });
+    $(k).addEventListener("change", refresh);
+  });
+  $("logo").addEventListener("change", e => {
+    const f = e.target.files[0]; if (!f) return;
+    const r = new FileReader();
+    r.onload = () => { state.logo = r.result; $("logoCtl").hidden = false; $("ecl").value = "H"; refresh(); };
+    r.readAsDataURL(f);
+  });
+  $("logoClear").onclick = () => { state.logo = null; $("logo").value = ""; $("logoCtl").hidden = true; refresh(); };
+
+  $("copy").onclick = async () => {
+    const text = $("link").value, el = $("copyMsg");
+    let ok = false;
+    try { await navigator.clipboard.writeText(text); ok = true; }
+    catch (e) {
+      const t = document.createElement("textarea"); t.value = text; document.body.appendChild(t); t.select();
+      try { ok = document.execCommand("copy"); } catch (_) {} t.remove();
+    }
+    el.className = "check " + (ok ? "ok" : "err");
+    el.textContent = ok ? "Скопировано: " + text : "Не удалось скопировать, выделите ссылку вручную.";
+    setTimeout(() => { el.textContent = ""; }, 3000);
+  };
+
+  function download(ext) {
+    if (!state.lib) return;
+    const o = qrOptions(1000);
+    if (ext === "svg") o.type = "svg";
+    const qr = new QRCodeStyling(o);
+    qr.download({ name: "qr-" + ($("id").value.trim() || "code") + "-1000", extension: ext });
+  }
+  $("dlPng").onclick = () => download("png");
+  $("dlSvg").onclick = () => download("svg");
+
+  async function loadCSV() {
+    if (!CSV_URL) { renderBanner(); refresh(); return; }
+    state.loaded = false; state.error = null; renderBanner();
+    try { state.data = await fetchCSV(); state.loaded = true; }
+    catch (e) { state.error = e.name === "AbortError" ? "таймаут " + FETCH_TIMEOUT_MS + " мс" : e.message; }
+    renderBanner(); renderMap(); refresh();
+  }
+  $("reload").onclick = loadCSV;
+
+  // библиотека QR грузится только в админке, не тормозит редирект
+  const s = document.createElement("script");
+  s.src = "https://cdn.jsdelivr.net/npm/qr-code-styling@1.6.0-rc.1/lib/qr-code-styling.js";
+  s.onload = () => { state.lib = true; renderQR(); };
+  s.onerror = () => { $("qrWarn").className = "check err"; $("qrWarn").textContent = "Не загрузилась библиотека QR (нужен интернет)."; };
+  document.head.appendChild(s);
+
+  function esc(t) { return String(t).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+
+  renderBanner(); refresh(); loadCSV();
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  const ns = document.getElementById("nsLink"); if (ns) ns.href = FALLBACK_URL;
+  if (IS_ADMIN) initAdmin();
+  else if (!ID) document.getElementById("landing").hidden = false;
+});
+</script>
+</body>
+</html>
